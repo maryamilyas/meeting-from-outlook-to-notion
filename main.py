@@ -7,57 +7,6 @@ from notion.collection import NotionDate
 from win10toast import ToastNotifier
 import secrets
 
-toaster = ToastNotifier()
-toaster.show_toast("Notion update", "Your script has been started to run")
-client = NotionClient(token_v2=secrets.token)
-calendar_url = secrets.calendar_urls
-
-collection_view = client.get_collection_view(calendar_url)
-week_days = ["Monday", "Tuesday", "Wednesday",
-             "Thursday", "Friday", "Saturday", "Sunday"]
-outlook_format = '%Y-%m-%d %H:%M'
-outlook = Dispatch("Outlook.Application")
-ns = outlook.GetNamespace("MAPI")
-prev_value = ["ab", "ba"]
-calcTableBody = []
-start_time = datetime.time(0)
-end_time = datetime.time(23)
-
-day = date.today()
-start = day - timedelta(days=day.weekday())
-end = start + timedelta(days=10)
-start_datetime = (datetime.datetime.combine(
-    start, start_time)).strftime("%Y-%m-%d %H:%M")
-end_datetime = datetime.datetime.combine(
-    end, end_time).strftime("%Y-%m-%d %H:%M")
-
-
-appointments = ns.GetDefaultFolder(9).Items
-appointments.Sort("[Start]")
-appointments.IncludeRecurrences = "True"
-
-# filter to the range: from = (today - 10), to = (today)
-appointments = appointments.Restrict(
-    "[Start] >= '" + start_datetime + "' AND [End] <= '" + end_datetime + "'")
-print(appointments)
-
-# Iterate through restricted AppointmentItems and create a df
-for appointment_item in appointments:
-    print(appointment_item)
-    if (appointment_item.Start.Format(outlook_format) > start_datetime) & (
-            appointment_item.Start.Format(outlook_format) < end_datetime):
-        row = []
-        row.append(appointment_item.Subject)
-        row.append(appointment_item.Start.Format(outlook_format))
-        row.append((appointment_item.Start +
-                   timedelta(minutes=appointment_item.Duration)).Format(outlook_format))
-        row.append('Central European Time (UTC+01:00)')
-        row.append({'unit': 'minute', 'value': 30})
-        row.append(appointment_item.body)
-        calcTableBody.append(row)
-
-
-
 def add_event_to_notion(event):
     """
     Adds a new row to the Notion database with the given information.
@@ -89,27 +38,83 @@ def add_event_to_notion(event):
     new_row.Addedby = 'Python'
 
 
-def filterdate(time_list):
-    print(type(start_datetime))
-    print(type(end_datetime))
-    today_start_1 = datetime.datetime.strftime(start, '%Y-%m-%d')
-    today_end_1 = datetime.datetime.strftime(end, '%Y-%m-%d')
+import datetime
 
-    if time_list >= today_start_1 and time_list <= today_end_1:
+def filterdate(time_list):
+    """
+    Filters a list of dates to only include those within the current day.
+
+    Args:
+    time_list (list): A list of datetime objects.
+
+    Returns:
+    bool: True if the datetime object is within the current day, False otherwise.
+    """
+    today_start = datetime.datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    today_end = datetime.datetime.now().replace(hour=23, minute=59, second=59, microsecond=999999)
+
+    if time_list >= today_start and time_list <= today_end:
         return True
     else:
         return False
 
 
+toaster = ToastNotifier()
+toaster.show_toast("Notion update", "Your script has been started to run")
+client = NotionClient(token_v2=secrets.token)
+calendar_url = secrets.calendar_urls
+
+collection_view = client.get_collection_view(calendar_url)
+week_days = ["Monday", "Tuesday", "Wednesday",
+             "Thursday", "Friday", "Saturday", "Sunday"]
+outlook_format = '%Y-%m-%d %H:%M'
+outlook = Dispatch("Outlook.Application")
+ns = outlook.GetNamespace("MAPI")
+prev_value = ["ab", "ba"]
+appointment_df = []
+start_time = datetime.time(0)
+end_time = datetime.time(23)
+
+day = date.today()
+start = day - timedelta(days=day.weekday())
+end = start + timedelta(days=10)
+start_datetime = (datetime.datetime.combine(
+    start, start_time)).strftime("%Y-%m-%d %H:%M")
+end_datetime = datetime.datetime.combine(
+    end, end_time).strftime("%Y-%m-%d %H:%M")
+
+
+appointments = ns.GetDefaultFolder(9).Items
+appointments.Sort("[Start]")
+appointments.IncludeRecurrences = "True"
+
+# filter to the range: from = (today - 10), to = (today)
+appointments = appointments.Restrict(
+    "[Start] >= '" + start_datetime + "' AND [End] <= '" + end_datetime + "'")
+
+# Iterate through restricted AppointmentItems and create a df
+for appointment_item in appointments:
+    if (appointment_item.Start.Format(outlook_format) > start_datetime) & (
+            appointment_item.Start.Format(outlook_format) < end_datetime):
+        row = []
+        row.append(appointment_item.Subject)
+        row.append(appointment_item.Start.Format(outlook_format))
+        row.append((appointment_item.Start +
+                   timedelta(minutes=appointment_item.Duration)).Format(outlook_format))
+        row.append('Central European Time (UTC+01:00)')
+        row.append({'unit': 'minute', 'value': 30})
+        row.append(appointment_item.body)
+        appointment_df.append(row)
+
 i = 0
-for event in calcTableBody:
+for event in appointment_df:
     add_event_to_notion(event)
     i = i + 1
 notification_status = str(i) + " new row(s) added into Notion"
 toaster.show_toast("Notion update", notification_status)
 
-for c in calcTableBody:
-    subject = c[0]
+for row in appointment_df:
+    subject = row[0]
     if len(collection_view.collection.get_rows(search=subject)) > 1:
         for row in collection_view.collection.get_rows(search=subject):
             if row.name == prev_value[0] and NotionDate.to_notion(row.When) == prev_value[1]:
